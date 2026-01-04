@@ -122,7 +122,6 @@ from datetime import timedelta
 INSTALLED_APPS += [
     "rest_framework",
     "rest_framework_simplejwt",
-    "accounts",
     "core",
 ]
 

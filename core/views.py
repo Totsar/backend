@@ -1,13 +1,17 @@
-from rest_framework import viewsets
-from rest_framework.permissions import IsAuthenticated
+from rest_framework import viewsets, generics
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from .models import Item
-from .serializers import ItemSerializer
+from .serializers import ItemSerializer, RegisterSerializer
 from .permissions import IsOwnerOrReadOnly
+
+class RegisterAPIView(generics.CreateAPIView):
+    serializer_class = RegisterSerializer
+    permission_classes = [AllowAny]
 
 class ItemViewSet(viewsets.ModelViewSet):
     queryset = Item.objects.all()
     serializer_class = ItemSerializer
-    permission_classes = (IsOwnerOrReadOnly,)
+    permission_classes = [IsOwnerOrReadOnly]
 
     def get_permissions(self):
         if self.action in ("list", "retrieve"):
