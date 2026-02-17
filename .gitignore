@@ -14,3 +14,5 @@ media
 
 .idea/
 .vscode/
+.venv/
+pyvenv.cfg
