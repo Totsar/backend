@@ -1,17 +1,38 @@
 from django.contrib import admin
-from django.urls import path, include
-from rest_framework.routers import DefaultRouter
-from core.views import ItemViewSet
-from core.views import RegisterAPIView
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from django.urls import path
+from django.conf import settings
+from django.conf.urls.static import static
 
-router = DefaultRouter()
-router.register(r"items", ItemViewSet, basename="item")
+from core.views import (
+    ItemCommentCreateAPIView,
+    ItemCommentDetailAPIView,
+    ItemDetailAPIView,
+    ItemListCreateAPIView,
+    ItemReportAPIView,
+    LoginAPIView,
+    LogoutAPIView,
+    RefreshAPIView,
+    RegisterAPIView,
+    VerifyAPIView,
+)
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/auth/register/", RegisterAPIView.as_view(), name="register"),
-    path("api/auth/login/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
-    path("api/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
-    path("api/", include(router.urls)),
+    path("api/auth/login/", LoginAPIView.as_view(), name="login"),
+    path("api/auth/logout/", LogoutAPIView.as_view(), name="logout"),
+    path("api/auth/refresh/", RefreshAPIView.as_view(), name="refresh"),
+    path("api/auth/verify/", VerifyAPIView.as_view(), name="verify"),
+    path("api/item/", ItemListCreateAPIView.as_view(), name="item-list-create"),
+    path("api/item/<int:item_id>/", ItemDetailAPIView.as_view(), name="item-detail"),
+    path("api/item/<int:item_id>/report/", ItemReportAPIView.as_view(), name="item-report"),
+    path("api/item/<int:item_id>/comment/", ItemCommentCreateAPIView.as_view(), name="item-comment-create"),
+    path(
+        "api/item/<int:item_id>/comment/<int:comment_id>/",
+        ItemCommentDetailAPIView.as_view(),
+        name="item-comment-detail",
+    ),
 ]
+
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
