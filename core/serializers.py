@@ -1,8 +1,15 @@
+import secrets
+from datetime import timedelta
+
+from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.mail import send_mail
+from django.db import transaction
+from django.utils import timezone
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import Comment, Item, Tag
+from .models import Comment, EmailOTP, Item, Tag
 
 
 User = get_user_model()
@@ -17,12 +24,8 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ["id", "firstName", "lastName", "email", "phone"]
 
 
-class RegisterSerializer(serializers.Serializer):
-    firstName = serializers.CharField(max_length=150)
-    lastName = serializers.CharField(max_length=150)
+class RequestRegisterOTPSerializer(serializers.Serializer):
     email = serializers.EmailField()
-    phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
-    password = serializers.CharField(write_only=True, min_length=8)
 
     def validate_email(self, value):
         normalized = value.lower()
@@ -32,14 +35,139 @@ class RegisterSerializer(serializers.Serializer):
 
     def create(self, validated_data):
         email = validated_data["email"]
-        return User.objects.create_user(
-            username=email,
-            email=email,
-            first_name=validated_data["firstName"],
-            last_name=validated_data["lastName"],
-            phone=validated_data.get("phone", ""),
-            password=validated_data["password"],
+        now = timezone.now()
+        active_otp = (
+            EmailOTP.objects.filter(
+                email=email,
+                purpose=EmailOTP.Purpose.REGISTER,
+                is_used=False,
+                expires_at__gt=now,
+            )
+            .order_by("-created_at")
+            .first()
         )
+
+        if active_otp:
+            cooldown_window = active_otp.created_at + timedelta(
+                seconds=settings.REGISTRATION_OTP_RESEND_COOLDOWN_SECONDS
+            )
+            if now < cooldown_window:
+                raise serializers.ValidationError(
+                    {
+                        "detail": (
+                            "Please wait before requesting another OTP."
+                        )
+                    }
+                )
+            active_otp.is_used = True
+            active_otp.save(update_fields=["is_used", "updated_at"])
+
+        otp = f"{secrets.randbelow(1_000_000):06d}"
+        otp_record = EmailOTP(
+            email=email,
+            purpose=EmailOTP.Purpose.REGISTER,
+            expires_at=now + timedelta(seconds=settings.REGISTRATION_OTP_TTL_SECONDS),
+        )
+        otp_record.set_otp(otp)
+        otp_record.save()
+
+        ttl_minutes = max(settings.REGISTRATION_OTP_TTL_SECONDS // 60, 1)
+        send_mail(
+            subject="Your verification code",
+            message=f"Your verification code is {otp}. It expires in {ttl_minutes} minutes.",
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[email],
+        )
+        return otp_record
+
+
+class RegisterSerializer(serializers.Serializer):
+    firstName = serializers.CharField(max_length=150)
+    lastName = serializers.CharField(max_length=150)
+    email = serializers.EmailField()
+    otp = serializers.RegexField(regex=r"^\d{6}$")
+    phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    password = serializers.CharField(write_only=True, min_length=8)
+
+    def validate_email(self, value):
+        return value.lower()
+
+    def validate(self, attrs):
+        email = attrs["email"]
+        now = timezone.now()
+        otp_record = (
+            EmailOTP.objects.filter(
+                email=email,
+                purpose=EmailOTP.Purpose.REGISTER,
+                is_used=False,
+                expires_at__gt=now,
+            )
+            .order_by("-created_at")
+            .first()
+        )
+        if otp_record is None:
+            raise serializers.ValidationError({"otp": "OTP is invalid or expired."})
+
+        attrs["otp_record_id"] = otp_record.id
+        return attrs
+
+    def create(self, validated_data):
+        otp = validated_data.pop("otp")
+        otp_record_id = validated_data.pop("otp_record_id")
+        email = validated_data["email"]
+        otp_record = (
+            EmailOTP.objects.filter(
+                id=otp_record_id,
+                email=email,
+                purpose=EmailOTP.Purpose.REGISTER,
+            ).first()
+        )
+        if otp_record is None or otp_record.is_used or otp_record.is_expired:
+            raise serializers.ValidationError({"otp": "OTP is invalid or expired."})
+
+        if otp_record.attempt_count >= settings.REGISTRATION_OTP_MAX_ATTEMPTS:
+            otp_record.is_used = True
+            otp_record.save(update_fields=["is_used", "updated_at"])
+            raise serializers.ValidationError(
+                {"otp": "OTP has exceeded the maximum attempts. Request a new code."}
+            )
+
+        if not otp_record.check_otp(otp):
+            otp_record.attempt_count += 1
+            update_fields = ["attempt_count", "updated_at"]
+            if otp_record.attempt_count >= settings.REGISTRATION_OTP_MAX_ATTEMPTS:
+                otp_record.is_used = True
+                update_fields.append("is_used")
+            otp_record.save(update_fields=update_fields)
+            raise serializers.ValidationError({"otp": "Invalid OTP."})
+
+        with transaction.atomic():
+            locked_otp_record = (
+                EmailOTP.objects.select_for_update()
+                .filter(
+                    id=otp_record_id,
+                    email=email,
+                    purpose=EmailOTP.Purpose.REGISTER,
+                )
+                .first()
+            )
+            if locked_otp_record is None or locked_otp_record.is_used or locked_otp_record.is_expired:
+                raise serializers.ValidationError({"otp": "OTP is invalid or expired."})
+
+            if User.objects.filter(email__iexact=email).exists():
+                raise serializers.ValidationError({"email": "A user with this email already exists."})
+
+            user = User.objects.create_user(
+                username=email,
+                email=email,
+                first_name=validated_data["firstName"],
+                last_name=validated_data["lastName"],
+                phone=validated_data.get("phone", ""),
+                password=validated_data["password"],
+            )
+            locked_otp_record.is_used = True
+            locked_otp_record.save(update_fields=["is_used", "updated_at"])
+            return user
 
 
 class LoginSerializer(serializers.Serializer):
