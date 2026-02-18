@@ -11,6 +11,7 @@ from core.views import (
     ItemReportAPIView,
     LoginAPIView,
     LogoutAPIView,
+    RequestRegisterOTPAPIView,
     RefreshAPIView,
     RegisterAPIView,
     VerifyAPIView,
@@ -18,6 +19,7 @@ from core.views import (
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("api/auth/register/request-otp", RequestRegisterOTPAPIView.as_view(), name="register-request-otp"),
     path("api/auth/register", RegisterAPIView.as_view(), name="register"),
     path("api/auth/login", LoginAPIView.as_view(), name="login"),
     path("api/auth/logout", LogoutAPIView.as_view(), name="logout"),
