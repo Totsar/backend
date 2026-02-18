@@ -156,4 +156,6 @@ CORS_ALLOWED_ORIGINS = [
     if host.strip()
 ]
 
+APPEND_SLASH = False
+
 AUTH_USER_MODEL = 'core.User'
