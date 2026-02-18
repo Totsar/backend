@@ -14,7 +14,6 @@ from core.views import (
     RequestRegisterOTPAPIView,
     RefreshAPIView,
     RegisterAPIView,
-    VerifyAPIView,
 )
 
 urlpatterns = [
@@ -24,7 +23,6 @@ urlpatterns = [
     path("api/auth/login", LoginAPIView.as_view(), name="login"),
     path("api/auth/logout", LogoutAPIView.as_view(), name="logout"),
     path("api/auth/refresh", RefreshAPIView.as_view(), name="refresh"),
-    path("api/auth/verify", VerifyAPIView.as_view(), name="verify"),
     path("api/item", ItemListCreateAPIView.as_view(), name="item-list-create"),
     path("api/item/<int:item_id>", ItemDetailAPIView.as_view(), name="item-detail"),
     path("api/item/<int:item_id>/report", ItemReportAPIView.as_view(), name="item-report"),

@@ -190,10 +190,6 @@ class RefreshSerializer(serializers.Serializer):
     refreshToken = serializers.CharField()
 
 
-class VerifySerializer(serializers.Serializer):
-    accessToken = serializers.CharField()
-
-
 class LogoutSerializer(serializers.Serializer):
     refreshToken = serializers.CharField()
 

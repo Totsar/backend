@@ -17,7 +17,6 @@ from .serializers import (
     RequestRegisterOTPSerializer,
     RefreshSerializer,
     RegisterSerializer,
-    VerifySerializer,
     build_auth_response,
 )
 
@@ -85,22 +84,6 @@ class RefreshAPIView(APIView):
             return Response({"detail": "Invalid refresh token."}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({"accessToken": str(access)}, status=status.HTTP_200_OK)
-
-
-class VerifyAPIView(APIView):
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        serializer = VerifySerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        access_token = serializer.validated_data["accessToken"]
-
-        try:
-            UntypedToken(access_token)
-        except TokenError:
-            return Response({"detail": "Invalid access token."}, status=status.HTTP_400_BAD_REQUEST)
-
-        return Response(status=status.HTTP_200_OK)
 
 
 class ItemListCreateAPIView(generics.ListCreateAPIView):
