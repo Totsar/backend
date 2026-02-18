@@ -16,3 +16,4 @@ media
 .vscode/
 .venv/
 pyvenv.cfg
+.env
