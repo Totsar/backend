@@ -152,7 +152,7 @@ SIMPLE_JWT = {
 
 CORS_ALLOWED_ORIGINS = [
     host.strip()
-    for host in os.getenv('DJANGO_ALLOWED_ORIGINS', 'http://localhost:5173/').split(',')
+    for host in os.getenv('DJANGO_ALLOWED_ORIGINS', 'http://localhost:5173').split(',')
     if host.strip()
 ]
 
