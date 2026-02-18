@@ -149,3 +149,17 @@ SIMPLE_JWT = {
 }
 
 AUTH_USER_MODEL = 'core.User'
+
+EMAIL_BACKEND = os.getenv("DJANGO_EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
+EMAIL_HOST = os.getenv("DJANGO_EMAIL_HOST", "")
+EMAIL_PORT = int(os.getenv("DJANGO_EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.getenv("DJANGO_EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("DJANGO_EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.getenv("DJANGO_EMAIL_USE_TLS", "True").lower() in ("1", "true", "yes", "on")
+DEFAULT_FROM_EMAIL = os.getenv("DJANGO_DEFAULT_FROM_EMAIL", "no-reply@example.com")
+
+REGISTRATION_OTP_TTL_SECONDS = int(os.getenv("REGISTRATION_OTP_TTL_SECONDS", "300"))
+REGISTRATION_OTP_RESEND_COOLDOWN_SECONDS = int(
+    os.getenv("REGISTRATION_OTP_RESEND_COOLDOWN_SECONDS", "60")
+)
+REGISTRATION_OTP_MAX_ATTEMPTS = int(os.getenv("REGISTRATION_OTP_MAX_ATTEMPTS", "5"))

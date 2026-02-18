@@ -14,11 +14,22 @@ from .serializers import (
     ItemSerializer,
     LoginSerializer,
     LogoutSerializer,
+    RequestRegisterOTPSerializer,
     RefreshSerializer,
     RegisterSerializer,
     VerifySerializer,
     build_auth_response,
 )
+
+
+class RequestRegisterOTPAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = RequestRegisterOTPSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response({"detail": "OTP sent successfully."}, status=status.HTTP_200_OK)
 
 
 class RegisterAPIView(generics.CreateAPIView):
