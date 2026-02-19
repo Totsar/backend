@@ -7,7 +7,7 @@ MANAGE := $(PY) manage.py
 DOCKER ?= docker
 COMPOSE ?= $(DOCKER) compose
 
-.PHONY: help venv install migrate makemigrations run superuser shell test check docker-build docker-up docker-down docker-logs
+.PHONY: help venv install migrate makemigrations run run-prod superuser shell test check docker-build docker-up docker-down docker-logs
 
 help:
 	@echo "Targets:"
@@ -15,6 +15,7 @@ help:
 	@echo "  make migrate         Apply database migrations"
 	@echo "  make makemigrations  Create new migrations"
 	@echo "  make run             Run dev server"
+	@echo "  make run-prod        Run production server (gunicorn)"
 	@echo "  make superuser       Create admin user"
 	@echo "  make shell           Open Django shell"
 	@echo "  make test            Run tests"
@@ -41,6 +42,9 @@ makemigrations:
 
 run:
 	$(MANAGE) runserver
+
+run-prod:
+	$(PY) -m gunicorn backend.wsgi:application --bind 0.0.0.0:8000
 
 superuser:
 	$(MANAGE) createsuperuser

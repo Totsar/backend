@@ -5,7 +5,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticate
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError
-from rest_framework_simplejwt.tokens import RefreshToken, UntypedToken
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import Comment, Item, ItemReport
 from .permissions import IsCommentAuthorOrReadOnly, IsItemOwnerOrReadOnly
