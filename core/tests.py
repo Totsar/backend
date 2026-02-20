@@ -1,5 +1,6 @@
 import re
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -190,3 +191,72 @@ class RegistrationOTPFlowTests(APITestCase):
         )
         self.assertEqual(final_try.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertFalse(User.objects.filter(email="attempts@example.com").exists())
+
+
+class LostItemAssistantAPITests(APITestCase):
+    def setUp(self):
+        self.assistant_url = reverse("lost-item-assistant")
+        self.stream_url = reverse("lost-item-assistant-stream")
+
+    @patch("core.views.find_lost_items_with_ai")
+    def test_assistant_endpoint_returns_message_and_ids(self, mock_find):
+        mock_find.return_value = {
+            "message": "These are likely matches.",
+            "picked_item_ids": [4, 7],
+            "candidate_item_ids": [4, 7, 9],
+        }
+
+        response = self.client.post(self.assistant_url, {"query": "black backpack"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["message"], "These are likely matches.")
+        self.assertEqual(response.data["pickedItemIds"], [4, 7])
+        self.assertEqual(response.data["candidateItemIds"], [4, 7, 9])
+        mock_find.assert_called_once_with(query="black backpack")
+
+    @patch("core.views.find_lost_items_with_ai")
+    def test_assistant_stream_endpoint_returns_events_including_selected_ids(self, mock_find):
+        mock_find.return_value = {
+            "message": "Likely item match from gate A area.",
+            "picked_item_ids": [10, 12],
+            "candidate_item_ids": [10, 12, 14],
+        }
+
+        response = self.client.post(self.stream_url, {"query": "airport wallet"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        body = b"".join(
+            chunk if isinstance(chunk, bytes) else chunk.encode("utf-8")
+            for chunk in response.streaming_content
+        ).decode("utf-8")
+
+        self.assertIn("event: assistant_message", body)
+        self.assertIn('event: selected_item_ids\ndata: {"itemIds": [10, 12]}', body)
+        self.assertIn('event: candidate_item_ids\ndata: {"itemIds": [10, 12, 14]}', body)
+        self.assertIn("event: done", body)
+
+    @patch("core.views.find_lost_items_with_ai", side_effect=RuntimeError("OPENAI_API_KEY is not configured."))
+    def test_assistant_endpoint_returns_503_on_runtime_error(self, _mock_find):
+        response = self.client.post(self.assistant_url, {"query": "watch"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertEqual(response.data["detail"], "OPENAI_API_KEY is not configured.")
+
+    def test_assistant_endpoint_requires_query(self):
+        response = self.client.post(self.assistant_url, {}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("query", response.data)
+
+
+class AIAssistantConfigTests(APITestCase):
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_BASE_URL="https://api.openai-proxy.local/v1")
+    @patch("openai.OpenAI")
+    def test_openai_client_uses_configured_base_url(self, mock_openai):
+        from .ai_assistant import _get_openai_client
+
+        _get_openai_client()
+
+        mock_openai.assert_called_once_with(
+            api_key="test-key",
+            base_url="https://api.openai-proxy.local/v1",
+        )

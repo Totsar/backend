@@ -9,6 +9,7 @@ from django.utils import timezone
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from .ai_assistant import sync_item_embedding
 from .models import Comment, EmailOTP, Item, Tag
 
 
@@ -234,6 +235,10 @@ class ItemSerializer(serializers.ModelSerializer):
         tags = validated_data.pop("tags", [])
         item = Item.objects.create(**validated_data)
         self._upsert_tags(item, tags)
+        try:
+            sync_item_embedding(item)
+        except Exception:
+            pass
         return item
 
     def update(self, instance, validated_data):
@@ -242,6 +247,10 @@ class ItemSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         instance.save()
         self._upsert_tags(instance, tags)
+        try:
+            sync_item_embedding(instance)
+        except Exception:
+            pass
         return instance
 
     def to_representation(self, instance):
@@ -260,3 +269,7 @@ def build_auth_response(user):
         "refreshToken": str(refresh),
         "user": UserSerializer(user).data,
     }
+
+
+class LostItemAssistantRequestSerializer(serializers.Serializer):
+    query = serializers.CharField(max_length=1000)

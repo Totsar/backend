@@ -57,6 +57,7 @@ class Item(models.Model):
     description = models.TextField(blank=True)
     image = models.ImageField(upload_to="items/", blank=True, null=True)
     location = models.CharField(max_length=255)
+    embedding = models.JSONField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     tags = models.ManyToManyField(Tag, related_name="items", blank=True)
 

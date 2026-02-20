@@ -10,6 +10,8 @@ from core.views import (
     ItemListCreateAPIView,
     ItemReportAPIView,
     LoginAPIView,
+    LostItemAssistantAPIView,
+    LostItemAssistantStreamAPIView,
     LogoutAPIView,
     RequestRegisterOTPAPIView,
     RefreshAPIView,
@@ -32,6 +34,8 @@ urlpatterns = [
         ItemCommentDetailAPIView.as_view(),
         name="item-comment-detail",
     ),
+    path("api/assistant/lost-item", LostItemAssistantAPIView.as_view(), name="lost-item-assistant"),
+    path("api/assistant/lost-item/stream", LostItemAssistantStreamAPIView.as_view(), name="lost-item-assistant-stream"),
 ]
 
 if settings.DEBUG:
