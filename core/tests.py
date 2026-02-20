@@ -11,7 +11,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import EmailOTP
+from .models import EmailOTP, Item
 
 
 User = get_user_model()
@@ -260,3 +260,53 @@ class AIAssistantConfigTests(APITestCase):
             api_key="test-key",
             base_url="https://api.openai-proxy.local/v1",
         )
+
+
+class ItemCoordinateAPITests(APITestCase):
+    def setUp(self):
+        self.item_url = reverse("item-list-create")
+        self.user = User.objects.create_user(
+            username="mapowner@example.com",
+            email="mapowner@example.com",
+            password="StrongPassword123",
+            first_name="Map",
+            last_name="Owner",
+        )
+        self.client.force_authenticate(user=self.user)
+
+    def test_create_item_with_coordinates(self):
+        response = self.client.post(
+            self.item_url,
+            {
+                "title": "Black wallet",
+                "description": "Lost near library entrance.",
+                "location": "Library entrance",
+                "latitude": 35.7025,
+                "longitude": 51.3494,
+                "tags": ["wallet", "black"],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["latitude"], 35.7025)
+        self.assertEqual(response.data["longitude"], 51.3494)
+        self.assertEqual(Item.objects.count(), 1)
+        item = Item.objects.get()
+        self.assertEqual(item.latitude, 35.7025)
+        self.assertEqual(item.longitude, 51.3494)
+
+    def test_create_item_requires_both_coordinates(self):
+        response = self.client.post(
+            self.item_url,
+            {
+                "title": "Phone",
+                "description": "Blue phone",
+                "location": "Main gate",
+                "latitude": 35.70,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("detail", response.data)
