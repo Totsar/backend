@@ -2,6 +2,7 @@ import json
 import math
 from typing import Any
 
+import httpx
 from django.conf import settings
 
 from .models import Item
@@ -24,10 +25,22 @@ def _build_item_text(item: Item) -> str:
 def _get_openai_client():
     from openai import OpenAI
 
-    return OpenAI(
-        api_key=settings.OPENAI_API_KEY,
-        base_url=settings.OPENAI_BASE_URL,
-    )
+    kwargs = {
+        "api_key": settings.OPENAI_API_KEY,
+        "base_url": settings.OPENAI_BASE_URL,
+    }
+
+    try:
+        return OpenAI(**kwargs)
+    except ValueError as exc:
+        # Some environments export unsupported proxy URLs (e.g., socks://),
+        # which makes httpx fail during client initialization.
+        if "proxy URL" not in str(exc):
+            raise
+        return OpenAI(
+            **kwargs,
+            http_client=httpx.Client(trust_env=False),
+        )
 
 
 def _embed_texts(texts: list[str]) -> list[list[float]]:
