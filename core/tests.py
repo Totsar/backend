@@ -1,5 +1,6 @@
 import re
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -10,7 +11,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import EmailOTP
+from .models import EmailOTP, Item
 
 
 User = get_user_model()
@@ -190,3 +191,169 @@ class RegistrationOTPFlowTests(APITestCase):
         )
         self.assertEqual(final_try.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertFalse(User.objects.filter(email="attempts@example.com").exists())
+
+
+class LostItemAssistantAPITests(APITestCase):
+    def setUp(self):
+        self.assistant_url = reverse("lost-item-assistant")
+        self.stream_url = reverse("lost-item-assistant-stream")
+
+    @patch("core.views.find_lost_items_with_ai")
+    def test_assistant_endpoint_returns_message_and_ids(self, mock_find):
+        mock_find.return_value = {
+            "message": "These are likely matches.",
+            "picked_item_ids": [4, 7],
+            "candidate_item_ids": [4, 7, 9],
+        }
+
+        response = self.client.post(self.assistant_url, {"query": "black backpack"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["message"], "These are likely matches.")
+        self.assertEqual(response.data["pickedItemIds"], [4, 7])
+        self.assertEqual(response.data["candidateItemIds"], [4, 7, 9])
+        mock_find.assert_called_once_with(query="black backpack")
+
+    @patch("core.views.find_lost_items_with_ai")
+    def test_assistant_stream_endpoint_returns_events_including_selected_ids(self, mock_find):
+        mock_find.return_value = {
+            "message": "Likely item match from gate A area.",
+            "picked_item_ids": [10, 12],
+            "candidate_item_ids": [10, 12, 14],
+        }
+
+        response = self.client.post(self.stream_url, {"query": "airport wallet"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        body = b"".join(
+            chunk if isinstance(chunk, bytes) else chunk.encode("utf-8")
+            for chunk in response.streaming_content
+        ).decode("utf-8")
+
+        self.assertIn("event: assistant_message", body)
+        self.assertIn('event: selected_item_ids\ndata: {"itemIds": [10, 12]}', body)
+        self.assertIn('event: candidate_item_ids\ndata: {"itemIds": [10, 12, 14]}', body)
+        self.assertIn("event: done", body)
+
+    @patch("core.views.find_lost_items_with_ai", side_effect=RuntimeError("OPENAI_API_KEY is not configured."))
+    def test_assistant_endpoint_returns_503_on_runtime_error(self, _mock_find):
+        response = self.client.post(self.assistant_url, {"query": "watch"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertEqual(response.data["detail"], "OPENAI_API_KEY is not configured.")
+
+    def test_assistant_endpoint_requires_query(self):
+        response = self.client.post(self.assistant_url, {}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("query", response.data)
+
+
+class AIAssistantConfigTests(APITestCase):
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_BASE_URL="https://api.openai-proxy.local/v1")
+    @patch("openai.OpenAI")
+    def test_openai_client_uses_configured_base_url(self, mock_openai):
+        from .ai_assistant import _get_openai_client
+
+        _get_openai_client()
+
+        mock_openai.assert_called_once_with(
+            api_key="test-key",
+            base_url="https://api.openai-proxy.local/v1",
+        )
+
+
+class ItemCoordinateAPITests(APITestCase):
+    def setUp(self):
+        self.item_url = reverse("item-list-create")
+        self.user = User.objects.create_user(
+            username="mapowner@example.com",
+            email="mapowner@example.com",
+            password="StrongPassword123",
+            first_name="Map",
+            last_name="Owner",
+        )
+        self.client.force_authenticate(user=self.user)
+
+    def test_create_item_with_coordinates(self):
+        response = self.client.post(
+            self.item_url,
+            {
+                "title": "Black wallet",
+                "description": "Lost near library entrance.",
+                "location": "Library entrance",
+                "itemType": "lost",
+                "latitude": 35.7025,
+                "longitude": 51.3494,
+                "tags": ["wallet", "black"],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["itemType"], "lost")
+        self.assertEqual(response.data["latitude"], 35.7025)
+        self.assertEqual(response.data["longitude"], 51.3494)
+        self.assertEqual(Item.objects.count(), 1)
+        item = Item.objects.get()
+        self.assertEqual(item.item_type, Item.ItemType.LOST)
+        self.assertEqual(item.latitude, 35.7025)
+        self.assertEqual(item.longitude, 51.3494)
+
+    def test_create_item_requires_both_coordinates(self):
+        response = self.client.post(
+            self.item_url,
+            {
+                "title": "Phone",
+                "description": "Blue phone",
+                "location": "Main gate",
+                "itemType": "lost",
+                "latitude": 35.70,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("detail", response.data)
+
+    def test_create_item_rejects_invalid_item_type(self):
+        response = self.client.post(
+            self.item_url,
+            {
+                "title": "Keys",
+                "description": "Found near cafeteria.",
+                "location": "Cafeteria",
+                "itemType": "invalid",
+                "latitude": 35.701,
+                "longitude": 51.349,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("itemType", response.data)
+
+    def test_list_items_filters_by_item_type(self):
+        Item.objects.create(
+            owner=self.user,
+            title="Lost notebook",
+            description="Black notebook",
+            location="Library",
+            item_type=Item.ItemType.LOST,
+            latitude=35.702,
+            longitude=51.35,
+        )
+        Item.objects.create(
+            owner=self.user,
+            title="Found headphones",
+            description="Silver pair",
+            location="Lab",
+            item_type=Item.ItemType.FOUND,
+            latitude=35.703,
+            longitude=51.351,
+        )
+
+        response = self.client.get(f"{self.item_url}?itemType=found")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["itemType"], "found")

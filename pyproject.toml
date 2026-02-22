@@ -10,4 +10,6 @@ dependencies = [
     "pillow>=11.3.0",
     "gunicorn>=23.0.0",
     "django-cors-headers>=4.9.0",
+    "openai>=1.61.0",
+    "python-dotenv>=1.0.1",
 ]

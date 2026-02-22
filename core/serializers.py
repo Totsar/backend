@@ -9,6 +9,7 @@ from django.utils import timezone
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from .ai_assistant import sync_item_embedding
 from .models import Comment, EmailOTP, Item, Tag
 
 
@@ -207,6 +208,13 @@ class ItemSerializer(serializers.ModelSerializer):
     userId = serializers.IntegerField(source="owner_id", read_only=True)
     createdAt = serializers.DateTimeField(source="created_at", read_only=True)
     comments = CommentSerializer(many=True, read_only=True)
+    itemType = serializers.ChoiceField(
+        source="item_type",
+        choices=Item.ItemType.choices,
+        required=False,
+    )
+    latitude = serializers.FloatField(required=False, allow_null=True, min_value=-90, max_value=90)
+    longitude = serializers.FloatField(required=False, allow_null=True, min_value=-180, max_value=180)
     tags = serializers.ListField(child=serializers.CharField(max_length=50), required=False, write_only=True)
 
     class Meta:
@@ -218,10 +226,35 @@ class ItemSerializer(serializers.ModelSerializer):
             "description",
             "image",
             "location",
+            "itemType",
+            "latitude",
+            "longitude",
             "createdAt",
             "tags",
             "comments",
         ]
+
+    def validate(self, attrs):
+        latitude = attrs.get("latitude")
+        longitude = attrs.get("longitude")
+
+        if self.instance is None:
+            if latitude is None or longitude is None:
+                raise serializers.ValidationError(
+                    {"detail": "Both latitude and longitude are required."}
+                )
+            return attrs
+
+        # Keep existing coordinates if they were not included in update payload.
+        effective_latitude = latitude if "latitude" in attrs else self.instance.latitude
+        effective_longitude = longitude if "longitude" in attrs else self.instance.longitude
+
+        if (effective_latitude is None) != (effective_longitude is None):
+            raise serializers.ValidationError(
+                {"detail": "Latitude and longitude must be provided together."}
+            )
+
+        return attrs
 
     def _upsert_tags(self, item, tags):
         if tags is None:
@@ -234,6 +267,10 @@ class ItemSerializer(serializers.ModelSerializer):
         tags = validated_data.pop("tags", [])
         item = Item.objects.create(**validated_data)
         self._upsert_tags(item, tags)
+        try:
+            sync_item_embedding(item)
+        except Exception:
+            pass
         return item
 
     def update(self, instance, validated_data):
@@ -242,6 +279,10 @@ class ItemSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         instance.save()
         self._upsert_tags(instance, tags)
+        try:
+            sync_item_embedding(instance)
+        except Exception:
+            pass
         return instance
 
     def to_representation(self, instance):
@@ -260,3 +301,7 @@ def build_auth_response(user):
         "refreshToken": str(refresh),
         "user": UserSerializer(user).data,
     }
+
+
+class LostItemAssistantRequestSerializer(serializers.Serializer):
+    query = serializers.CharField(max_length=1000)
