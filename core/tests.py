@@ -281,6 +281,7 @@ class ItemCoordinateAPITests(APITestCase):
                 "title": "Black wallet",
                 "description": "Lost near library entrance.",
                 "location": "Library entrance",
+                "itemType": "lost",
                 "latitude": 35.7025,
                 "longitude": 51.3494,
                 "tags": ["wallet", "black"],
@@ -289,10 +290,12 @@ class ItemCoordinateAPITests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["itemType"], "lost")
         self.assertEqual(response.data["latitude"], 35.7025)
         self.assertEqual(response.data["longitude"], 51.3494)
         self.assertEqual(Item.objects.count(), 1)
         item = Item.objects.get()
+        self.assertEqual(item.item_type, Item.ItemType.LOST)
         self.assertEqual(item.latitude, 35.7025)
         self.assertEqual(item.longitude, 51.3494)
 
@@ -303,6 +306,7 @@ class ItemCoordinateAPITests(APITestCase):
                 "title": "Phone",
                 "description": "Blue phone",
                 "location": "Main gate",
+                "itemType": "lost",
                 "latitude": 35.70,
             },
             format="json",
@@ -310,3 +314,46 @@ class ItemCoordinateAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("detail", response.data)
+
+    def test_create_item_rejects_invalid_item_type(self):
+        response = self.client.post(
+            self.item_url,
+            {
+                "title": "Keys",
+                "description": "Found near cafeteria.",
+                "location": "Cafeteria",
+                "itemType": "invalid",
+                "latitude": 35.701,
+                "longitude": 51.349,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("itemType", response.data)
+
+    def test_list_items_filters_by_item_type(self):
+        Item.objects.create(
+            owner=self.user,
+            title="Lost notebook",
+            description="Black notebook",
+            location="Library",
+            item_type=Item.ItemType.LOST,
+            latitude=35.702,
+            longitude=51.35,
+        )
+        Item.objects.create(
+            owner=self.user,
+            title="Found headphones",
+            description="Silver pair",
+            location="Lab",
+            item_type=Item.ItemType.FOUND,
+            latitude=35.703,
+            longitude=51.351,
+        )
+
+        response = self.client.get(f"{self.item_url}?itemType=found")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["itemType"], "found")

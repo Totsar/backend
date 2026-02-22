@@ -16,6 +16,7 @@ def _build_item_text(item: Item) -> str:
     tags = ", ".join(item.tags.values_list("name", flat=True))
     return (
         f"title: {item.title}\n"
+        f"type: {item.item_type}\n"
         f"description: {item.description}\n"
         f"location: {item.location}\n"
         f"tags: {tags}"
@@ -173,6 +174,7 @@ def find_lost_items_with_ai(query: str) -> dict[str, Any]:
             {
                 "id": item.id,
                 "title": item.title,
+                "item_type": item.item_type,
                 "description": item.description,
                 "location": item.location,
                 "tags": list(item.tags.values_list("name", flat=True)),

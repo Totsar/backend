@@ -100,6 +100,7 @@ class ItemListCreateAPIView(generics.ListCreateAPIView):
         search = self.request.query_params.get("search")
         tag = self.request.query_params.get("tag")
         owner = self.request.query_params.get("owner")
+        item_type = self.request.query_params.get("itemType") or self.request.query_params.get("item_type")
 
         if search:
             queryset = queryset.filter(
@@ -111,6 +112,8 @@ class ItemListCreateAPIView(generics.ListCreateAPIView):
             queryset = queryset.filter(tags__name__iexact=tag)
         if owner:
             queryset = queryset.filter(owner_id=owner)
+        if item_type:
+            queryset = queryset.filter(item_type=item_type)
 
         return queryset.distinct().order_by("-created_at")
 

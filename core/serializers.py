@@ -208,6 +208,11 @@ class ItemSerializer(serializers.ModelSerializer):
     userId = serializers.IntegerField(source="owner_id", read_only=True)
     createdAt = serializers.DateTimeField(source="created_at", read_only=True)
     comments = CommentSerializer(many=True, read_only=True)
+    itemType = serializers.ChoiceField(
+        source="item_type",
+        choices=Item.ItemType.choices,
+        required=False,
+    )
     latitude = serializers.FloatField(required=False, allow_null=True, min_value=-90, max_value=90)
     longitude = serializers.FloatField(required=False, allow_null=True, min_value=-180, max_value=180)
     tags = serializers.ListField(child=serializers.CharField(max_length=50), required=False, write_only=True)
@@ -221,6 +226,7 @@ class ItemSerializer(serializers.ModelSerializer):
             "description",
             "image",
             "location",
+            "itemType",
             "latitude",
             "longitude",
             "createdAt",

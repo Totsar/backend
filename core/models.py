@@ -52,11 +52,21 @@ class Tag(models.Model):
 
 
 class Item(models.Model):
+    class ItemType(models.TextChoices):
+        LOST = "lost", "Lost"
+        FOUND = "found", "Found"
+
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="items")
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
     image = models.ImageField(upload_to="items/", blank=True, null=True)
     location = models.CharField(max_length=255)
+    item_type = models.CharField(
+        max_length=16,
+        choices=ItemType.choices,
+        default=ItemType.LOST,
+        db_index=True,
+    )
     latitude = models.FloatField(blank=True, null=True)
     longitude = models.FloatField(blank=True, null=True)
     embedding = models.JSONField(blank=True, null=True)
