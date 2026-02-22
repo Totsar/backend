@@ -29,6 +29,7 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-0q^tnuz*g3u9^w#9m#*
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DJANGO_DEBUG', 'True').lower() in ('1', 'true', 'yes', 'on')
+SERVE_MEDIA_FILES = os.getenv("DJANGO_SERVE_MEDIA", "True").lower() in ("1", "true", "yes", "on")
 
 ALLOWED_HOSTS = [
     host.strip()
@@ -183,3 +184,5 @@ OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-s
 ASSISTANT_MAX_ITEMS_TO_EMBED_PER_REQUEST = int(
     os.getenv("ASSISTANT_MAX_ITEMS_TO_EMBED_PER_REQUEST", "200")
 )
+
+ITEM_IMAGE_MAX_BYTES = int(os.getenv("ITEM_IMAGE_MAX_BYTES", str(5 * 1024 * 1024)))

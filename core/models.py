@@ -1,6 +1,11 @@
+import uuid
+from pathlib import Path
+
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.contrib.auth.hashers import check_password, make_password
+from django.core.validators import FileExtensionValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.utils import timezone
 
 
@@ -51,6 +56,11 @@ class Tag(models.Model):
         return self.name
 
 
+def item_image_upload_path(_instance, filename):
+    extension = Path(filename).suffix.lower() or ".jpg"
+    return f"items/{uuid.uuid4().hex}{extension}"
+
+
 class Item(models.Model):
     class ItemType(models.TextChoices):
         LOST = "lost", "Lost"
@@ -59,7 +69,20 @@ class Item(models.Model):
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="items")
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
-    image = models.ImageField(upload_to="items/", blank=True, null=True)
+    image = models.ImageField(
+        upload_to=item_image_upload_path,
+        blank=True,
+        null=True,
+        validators=[
+            FileExtensionValidator(
+                allowed_extensions=["jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif"]
+            )
+        ],
+    )
+    image_focus_y = models.PositiveSmallIntegerField(
+        default=50,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
     location = models.CharField(max_length=255)
     item_type = models.CharField(
         max_length=16,
