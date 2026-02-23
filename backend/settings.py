@@ -29,7 +29,6 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-0q^tnuz*g3u9^w#9m#*
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DJANGO_DEBUG', 'True').lower() in ('1', 'true', 'yes', 'on')
-SERVE_MEDIA_FILES = os.getenv("DJANGO_SERVE_MEDIA", "True").lower() in ("1", "true", "yes", "on")
 
 ALLOWED_HOSTS = [
     host.strip()
