@@ -1,4 +1,5 @@
 import secrets
+import json
 from datetime import timedelta
 
 from django.conf import settings
@@ -216,6 +217,13 @@ class ItemSerializer(serializers.ModelSerializer):
     latitude = serializers.FloatField(required=False, allow_null=True, min_value=-90, max_value=90)
     longitude = serializers.FloatField(required=False, allow_null=True, min_value=-180, max_value=180)
     tags = serializers.ListField(child=serializers.CharField(max_length=50), required=False, write_only=True)
+    removeImage = serializers.BooleanField(write_only=True, required=False, default=False)
+    imagePreviewY = serializers.IntegerField(
+        source="image_focus_y",
+        required=False,
+        min_value=0,
+        max_value=100,
+    )
 
     class Meta:
         model = Item
@@ -225,6 +233,8 @@ class ItemSerializer(serializers.ModelSerializer):
             "title",
             "description",
             "image",
+            "imagePreviewY",
+            "removeImage",
             "location",
             "itemType",
             "latitude",
@@ -256,15 +266,83 @@ class ItemSerializer(serializers.ModelSerializer):
 
         return attrs
 
+    def validate_image(self, value):
+        if not value:
+            return value
+
+        max_bytes = int(getattr(settings, "ITEM_IMAGE_MAX_BYTES", 5 * 1024 * 1024))
+        if value.size > max_bytes:
+            raise serializers.ValidationError(
+                f"Image is too large. Maximum size is {max_bytes // (1024 * 1024)} MB."
+            )
+
+        content_type = getattr(value, "content_type", "") or ""
+        if not content_type.startswith("image/"):
+            raise serializers.ValidationError("Only image files are allowed.")
+
+        return value
+
+    def validate_tags(self, value):
+        raw_values = []
+
+        if isinstance(value, str):
+            normalized_raw = value.strip()
+            if not normalized_raw:
+                return []
+            if normalized_raw.startswith("["):
+                try:
+                    parsed = json.loads(normalized_raw)
+                except json.JSONDecodeError as exc:
+                    raise serializers.ValidationError("Invalid tags payload.") from exc
+                if not isinstance(parsed, list):
+                    raise serializers.ValidationError("Tags must be a list.")
+                raw_values.extend(parsed)
+            else:
+                raw_values.append(normalized_raw)
+        elif isinstance(value, (list, tuple)):
+            for entry in value:
+                if isinstance(entry, str):
+                    normalized_entry = entry.strip()
+                    if not normalized_entry:
+                        continue
+                    if normalized_entry.startswith("["):
+                        try:
+                            parsed = json.loads(normalized_entry)
+                        except json.JSONDecodeError as exc:
+                            raise serializers.ValidationError("Invalid tags payload.") from exc
+                        if not isinstance(parsed, list):
+                            raise serializers.ValidationError("Tags must be a list.")
+                        raw_values.extend(parsed)
+                    else:
+                        raw_values.append(normalized_entry)
+                else:
+                    raw_values.append(entry)
+        else:
+            raise serializers.ValidationError("Tags must be provided as a list.")
+
+        normalized_tags = []
+        for entry in raw_values:
+            text = str(entry).strip().lower()
+            if not text:
+                continue
+            if len(text) > 50:
+                raise serializers.ValidationError("Each tag must be at most 50 characters.")
+            if text in normalized_tags:
+                continue
+            normalized_tags.append(text)
+
+        return normalized_tags
+
     def _upsert_tags(self, item, tags):
         if tags is None:
             return
-        normalized = sorted(set(tag.strip().lower() for tag in tags if tag.strip()))
+        normalized = [tag for tag in tags if tag]
         tag_objects = [Tag.objects.get_or_create(name=name)[0] for name in normalized]
         item.tags.set(tag_objects)
 
     def create(self, validated_data):
         tags = validated_data.pop("tags", [])
+        validated_data.pop("removeImage", None)
         item = Item.objects.create(**validated_data)
         self._upsert_tags(item, tags)
         try:
@@ -275,8 +353,11 @@ class ItemSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         tags = validated_data.pop("tags", None)
+        remove_image = validated_data.pop("removeImage", False)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+        if remove_image:
+            instance.image = None
         instance.save()
         self._upsert_tags(instance, tags)
         try:

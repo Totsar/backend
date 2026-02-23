@@ -1,13 +1,19 @@
+import os
 import re
+import shutil
+import tempfile
+from io import BytesIO
 from datetime import timedelta
 from unittest.mock import patch
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core import mail
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
+from PIL import Image as PillowImage
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -357,3 +363,128 @@ class ItemCoordinateAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]["itemType"], "found")
+
+
+class ItemImageUploadAPITests(APITestCase):
+    def setUp(self):
+        self.item_url = reverse("item-list-create")
+        self.user = User.objects.create_user(
+            username="image-owner@example.com",
+            email="image-owner@example.com",
+            password="StrongPassword123",
+            first_name="Image",
+            last_name="Owner",
+        )
+        self.client.force_authenticate(user=self.user)
+        self.media_dir = tempfile.mkdtemp()
+        self.override_media = override_settings(MEDIA_ROOT=self.media_dir)
+        self.override_media.enable()
+
+    def tearDown(self):
+        self.override_media.disable()
+        shutil.rmtree(self.media_dir, ignore_errors=True)
+
+    def _build_image_file(self, filename="item.png", image_format="PNG", size=(120, 120), color=(20, 120, 180)):
+        buffer = BytesIO()
+        image = PillowImage.new("RGB", size, color=color)
+        image.save(buffer, format=image_format)
+        return SimpleUploadedFile(
+            filename,
+            buffer.getvalue(),
+            content_type=f"image/{image_format.lower()}",
+        )
+
+    def _multipart_payload(self, **overrides):
+        payload = {
+            "title": "Backpack",
+            "description": "Blue backpack",
+            "location": "Library",
+            "itemType": "lost",
+            "latitude": "35.7025",
+            "longitude": "51.3494",
+            "tags[0]": "bag",
+            "tags[1]": "electronics",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_create_item_with_image_upload(self):
+        response = self.client.post(
+            self.item_url,
+            self._multipart_payload(image=self._build_image_file()),
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(response.data["image"])
+        item = Item.objects.get()
+        self.assertTrue(item.image.name.startswith("items/"))
+        self.assertTrue(os.path.exists(item.image.path))
+
+    def test_create_item_rejects_non_image_upload(self):
+        text_file = SimpleUploadedFile("item.txt", b"hello", content_type="text/plain")
+        response = self.client.post(
+            self.item_url,
+            self._multipart_payload(image=text_file),
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("image", response.data)
+
+    @override_settings(ITEM_IMAGE_MAX_BYTES=2000)
+    def test_create_item_rejects_oversized_image(self):
+        large_image = self._build_image_file(
+            filename="large.bmp",
+            image_format="BMP",
+            size=(1000, 1000),
+        )
+        response = self.client.post(
+            self.item_url,
+            self._multipart_payload(image=large_image),
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("image", response.data)
+
+    def test_update_item_remove_image_deletes_file(self):
+        created = self.client.post(
+            self.item_url,
+            self._multipart_payload(image=self._build_image_file()),
+            format="multipart",
+        )
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+
+        item_id = created.data["id"]
+        item = Item.objects.get(id=item_id)
+        old_image_path = item.image.path
+        self.assertTrue(os.path.exists(old_image_path))
+
+        response = self.client.put(
+            reverse("item-detail", kwargs={"item_id": item_id}),
+            self._multipart_payload(removeImage="true"),
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        item.refresh_from_db()
+        self.assertFalse(bool(item.image))
+        self.assertFalse(os.path.exists(old_image_path))
+
+    def test_delete_item_deletes_image_file(self):
+        created = self.client.post(
+            self.item_url,
+            self._multipart_payload(image=self._build_image_file()),
+            format="multipart",
+        )
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+
+        item_id = created.data["id"]
+        item = Item.objects.get(id=item_id)
+        image_path = item.image.path
+        self.assertTrue(os.path.exists(image_path))
+
+        response = self.client.delete(reverse("item-detail", kwargs={"item_id": item_id}))
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(os.path.exists(image_path))
