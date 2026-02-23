@@ -104,6 +104,7 @@ class Comment(models.Model):
     item = models.ForeignKey(Item, on_delete=models.CASCADE, related_name="comments")
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="comments")
     text = models.TextField()
+    is_removed = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -118,4 +119,24 @@ class ItemReport(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(fields=["item", "user"], name="unique_user_item_report"),
+        ]
+
+
+class CommentReport(models.Model):
+    class Reason(models.TextChoices):
+        SPAM = "spam", "Spam"
+        OFFENSIVE = "offensive", "Offensive / inappropriate"
+        HARASSMENT = "harassment", "Harassment"
+        IRRELEVANT = "irrelevant", "Irrelevant"
+        OTHER = "other", "Other"
+
+    comment = models.ForeignKey(Comment, on_delete=models.CASCADE, related_name="reports")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="comment_reports")
+    reason = models.CharField(max_length=32, choices=Reason.choices)
+    note = models.CharField(max_length=280, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["comment", "user"], name="unique_user_comment_report"),
         ]

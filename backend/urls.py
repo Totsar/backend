@@ -4,6 +4,7 @@ from django.conf import settings
 from django.views.static import serve as media_serve
 
 from core.views import (
+    CommentReportAPIView,
     ItemCommentCreateAPIView,
     ItemCommentDetailAPIView,
     ItemDetailAPIView,
@@ -33,6 +34,11 @@ urlpatterns = [
         "api/item/<int:item_id>/comment/<int:comment_id>",
         ItemCommentDetailAPIView.as_view(),
         name="item-comment-detail",
+    ),
+    path(
+        "api/item/<int:item_id>/comment/<int:comment_id>/report",
+        CommentReportAPIView.as_view(),
+        name="item-comment-report",
     ),
     path("api/assistant/lost-item", LostItemAssistantAPIView.as_view(), name="lost-item-assistant"),
     path("api/assistant/lost-item/stream", LostItemAssistantStreamAPIView.as_view(), name="lost-item-assistant-stream"),

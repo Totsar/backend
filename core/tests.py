@@ -17,7 +17,7 @@ from PIL import Image as PillowImage
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import EmailOTP, Item
+from .models import Comment, CommentReport, EmailOTP, Item
 
 
 User = get_user_model()
@@ -488,3 +488,105 @@ class ItemImageUploadAPITests(APITestCase):
         response = self.client.delete(reverse("item-detail", kwargs={"item_id": item_id}))
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(os.path.exists(image_path))
+
+
+class CommentReportingAPITests(APITestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            username="owner@example.com",
+            email="owner@example.com",
+            password="StrongPassword123",
+            first_name="Owner",
+            last_name="User",
+        )
+        self.comment_author = User.objects.create_user(
+            username="commenter@example.com",
+            email="commenter@example.com",
+            password="StrongPassword123",
+            first_name="Comment",
+            last_name="Author",
+        )
+        self.reporter = User.objects.create_user(
+            username="reporter@example.com",
+            email="reporter@example.com",
+            password="StrongPassword123",
+            first_name="Report",
+            last_name="User",
+        )
+        self.item = Item.objects.create(
+            owner=self.owner,
+            title="Wallet",
+            description="Black wallet",
+            location="Library",
+            item_type=Item.ItemType.LOST,
+            latitude=35.7,
+            longitude=51.35,
+        )
+        self.comment = Comment.objects.create(item=self.item, user=self.comment_author, text="Suspicious link")
+
+    def _report_url(self):
+        return reverse(
+            "item-comment-report",
+            kwargs={"item_id": self.item.id, "comment_id": self.comment.id},
+        )
+
+    def test_user_can_report_comment_once(self):
+        self.client.force_authenticate(user=self.reporter)
+        response = self.client.post(self._report_url(), {"reason": "spam"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(CommentReport.objects.count(), 1)
+        report = CommentReport.objects.get()
+        self.assertEqual(report.user_id, self.reporter.id)
+        self.assertEqual(report.comment_id, self.comment.id)
+        self.assertEqual(report.reason, "spam")
+
+    def test_duplicate_report_is_rejected(self):
+        self.client.force_authenticate(user=self.reporter)
+        first = self.client.post(self._report_url(), {"reason": "spam"}, format="json")
+        second = self.client.post(self._report_url(), {"reason": "offensive"}, format="json")
+
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(second.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(CommentReport.objects.count(), 1)
+
+    def test_comment_author_cannot_report_own_comment(self):
+        self.client.force_authenticate(user=self.comment_author)
+        response = self.client.post(self._report_url(), {"reason": "spam"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(CommentReport.objects.count(), 0)
+
+    def test_comment_is_removed_after_more_than_five_reports(self):
+        reporters = [
+            User.objects.create_user(
+                username=f"reporter{index}@example.com",
+                email=f"reporter{index}@example.com",
+                password="StrongPassword123",
+                first_name=f"Reporter{index}",
+                last_name="User",
+            )
+            for index in range(1, 7)
+        ]
+
+        for user in reporters:
+            self.client.force_authenticate(user=user)
+            response = self.client.post(self._report_url(), {"reason": "spam"}, format="json")
+            self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        self.comment.refresh_from_db()
+        self.assertTrue(self.comment.is_removed)
+
+        item_response = self.client.get(reverse("item-detail", kwargs={"item_id": self.item.id}))
+        self.assertEqual(item_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(item_response.data["comments"], [])
+
+    def test_removed_comment_cannot_be_reported(self):
+        self.comment.is_removed = True
+        self.comment.save(update_fields=["is_removed"])
+
+        self.client.force_authenticate(user=self.reporter)
+        response = self.client.post(self._report_url(), {"reason": "spam"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(CommentReport.objects.count(), 0)
