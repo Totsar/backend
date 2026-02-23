@@ -1,6 +1,7 @@
 import json
 
-from django.db.models import Q
+from django.db import transaction
+from django.db.models import Count, Prefetch, Q
 from django.shortcuts import get_object_or_404
 from django.http import StreamingHttpResponse
 from rest_framework import generics, status
@@ -11,10 +12,11 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .ai_assistant import find_lost_items_with_ai
-from .models import Comment, Item, ItemReport
+from .models import Comment, CommentReport, Item, ItemReport
 from .permissions import IsCommentAuthorOrReadOnly, IsItemOwnerOrReadOnly
 from .serializers import (
     CommentSerializer,
+    CommentReportCreateSerializer,
     ItemSerializer,
     LoginSerializer,
     LogoutSerializer,
@@ -24,6 +26,21 @@ from .serializers import (
     LostItemAssistantRequestSerializer,
     build_auth_response,
 )
+
+COMMENT_REMOVE_THRESHOLD = 5
+
+
+def _item_queryset():
+    visible_comments = (
+        Comment.objects.filter(is_removed=False)
+        .select_related("user")
+        .prefetch_related("reports")
+        .annotate(report_count=Count("reports"))
+    )
+    return Item.objects.select_related("owner").prefetch_related(
+        "tags",
+        Prefetch("comments", queryset=visible_comments),
+    )
 
 
 class RequestRegisterOTPAPIView(APIView):
@@ -96,7 +113,7 @@ class ItemListCreateAPIView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticatedOrReadOnly]
 
     def get_queryset(self):
-        queryset = Item.objects.select_related("owner").prefetch_related("tags", "comments__user").all()
+        queryset = _item_queryset().all()
         search = self.request.query_params.get("search")
         tag = self.request.query_params.get("tag")
         owner = self.request.query_params.get("owner")
@@ -124,7 +141,7 @@ class ItemListCreateAPIView(generics.ListCreateAPIView):
 class ItemDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = ItemSerializer
     permission_classes = [IsItemOwnerOrReadOnly]
-    queryset = Item.objects.select_related("owner").prefetch_related("tags", "comments__user").all()
+    queryset = _item_queryset().all()
     lookup_url_kwarg = "item_id"
 
 
@@ -152,7 +169,52 @@ class ItemCommentDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
     lookup_url_kwarg = "comment_id"
 
     def get_queryset(self):
-        return Comment.objects.filter(item_id=self.kwargs["item_id"]).select_related("user")
+        return (
+            Comment.objects.filter(item_id=self.kwargs["item_id"], is_removed=False)
+            .select_related("user")
+            .prefetch_related("reports")
+            .annotate(report_count=Count("reports"))
+        )
+
+
+class CommentReportAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, item_id, comment_id):
+        comment = get_object_or_404(Comment, pk=comment_id, item_id=item_id)
+        if comment.is_removed:
+            return Response({"detail": "This comment has been removed."}, status=status.HTTP_400_BAD_REQUEST)
+        if comment.user_id == request.user.id:
+            return Response(
+                {"detail": "You cannot report your own comment."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = CommentReportCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        with transaction.atomic():
+            locked_comment = Comment.objects.select_for_update().get(pk=comment.id)
+            if locked_comment.is_removed:
+                return Response({"detail": "This comment has been removed."}, status=status.HTTP_400_BAD_REQUEST)
+
+            report, created = CommentReport.objects.get_or_create(
+                comment=locked_comment,
+                user=request.user,
+                defaults=serializer.validated_data,
+            )
+            if not created:
+                return Response(
+                    {"detail": "You have already reported this comment."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            report_count = CommentReport.objects.filter(comment=locked_comment).count()
+            if report_count > COMMENT_REMOVE_THRESHOLD:
+                locked_comment.is_removed = True
+                locked_comment.save(update_fields=["is_removed"])
+
+        return Response({"detail": "Comment reported successfully."}, status=status.HTTP_201_CREATED)
 
 
 def _sse_event(event: str, data: dict) -> str:

@@ -11,7 +11,7 @@ from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .ai_assistant import sync_item_embedding
-from .models import Comment, EmailOTP, Item, Tag
+from .models import Comment, CommentReport, EmailOTP, Item, Tag
 
 
 User = get_user_model()
@@ -199,10 +199,50 @@ class LogoutSerializer(serializers.Serializer):
 class CommentSerializer(serializers.ModelSerializer):
     userId = serializers.IntegerField(source="user_id", read_only=True)
     createdAt = serializers.DateTimeField(source="created_at", read_only=True)
+    reportCount = serializers.SerializerMethodField()
+    isReportedByMe = serializers.SerializerMethodField()
+    canReport = serializers.SerializerMethodField()
 
     class Meta:
         model = Comment
-        fields = ["id", "userId", "text", "createdAt"]
+        fields = ["id", "userId", "text", "createdAt", "reportCount", "isReportedByMe", "canReport"]
+
+    def get_reportCount(self, obj):
+        annotated_count = getattr(obj, "report_count", None)
+        if annotated_count is not None:
+            return annotated_count
+        return obj.reports.count()
+
+    def get_isReportedByMe(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return False
+        return obj.reports.filter(user_id=user.id).exists()
+
+    def get_canReport(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return False
+        if obj.user_id == user.id or obj.is_removed:
+            return False
+        return not obj.reports.filter(user_id=user.id).exists()
+
+
+class CommentReportCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CommentReport
+        fields = ["reason", "note"]
+
+    def validate(self, attrs):
+        reason = attrs.get("reason")
+        note = (attrs.get("note") or "").strip()
+        if reason == CommentReport.Reason.OTHER:
+            attrs["note"] = note
+            return attrs
+        attrs["note"] = ""
+        return attrs
 
 
 class ItemSerializer(serializers.ModelSerializer):
